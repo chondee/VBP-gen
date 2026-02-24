@@ -1,0 +1,597 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<!--<link rel="shortcut icon" href="favicon.ico" type="image/x-icon">-->
+		<style>
+			body{
+				font-family: 'Nunito', sans-serif;
+				margin-left:50px;
+			}	
+			td{
+				width: 150px;
+				padding: 3px;
+			}
+			ul {
+			  list-style-type: none; /* Removes the default bullet points */
+			}
+
+			#validity{
+				color:red;
+			}
+			#fileSize{
+				color:green;
+			}
+			#maincontent{
+				margin: auto;
+  				width: 50%;
+  				border: 3px solid black;
+  				padding: 10px;
+			}
+			h1{
+				margin: auto;
+  				width: 50%;
+  				
+  				padding: 10px;
+			}
+
+			#generateButton{
+				padding: 15px;
+				font-size:18px;
+			}
+			#previewButton{
+				padding: 15px;
+				font-size:18px;
+			}
+			#orientButton{
+				/*padding: 15px;*/
+				font-size:24px;
+				display:none;
+			}
+
+			#uploadStatus{ margin-top:10px; font-weight:600; }
+			#uploadStatus.ok{ color:#0a7; }
+			#uploadStatus.err{ color:#c33; }
+			#previewLinkBox{ margin-top:10px; display:none; }
+			#previewLinkBox input{ width: 95%; padding: 6px; }
+			#uploadToken{ width: 320px; padding: 6px; }
+			#uploadButton{ padding: 15px; font-size:18px; opacity:0.6; }
+			#uploadButton.enabled{ opacity:1; }
+			#vidPreview{
+				/*border: 2px solid gray;*/
+				margin-left:50px;
+				width: 700px;
+				height:700px;
+				/*background-color: black;*/
+				display:none;
+			}
+		</style>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+		<script>
+			// === R2 Uploader integration (Worker -> R2 binding) ===
+			const WORKER_UPLOAD_URL = "https://lively-boat-f264.chondee666.workers.dev/upload";
+			const R2_PUBLIC_BASE = "https://pub-86c4de85e6b74f99876fa9e2c3cc7fba.r2.dev/"; // <-- update if your public R2 URL changes
+			const PREVIEW_BASE = "https://chondee.github.io/PlayablePreview/indexR2.html?h=";
+			let lastGeneratedFile = null; // File object created on Export
+
+			function setUploadStatus(msg, ok){
+				var el = document.getElementById("uploadStatus");
+				if(!el) return;
+				el.className = ok ? "ok" : "err";
+				el.textContent = msg || "";
+			}
+
+			function enableUploadButton(enabled){
+				var btn = document.getElementById("uploadButton");
+				if(!btn) return;
+				btn.disabled = !enabled;
+				btn.className = enabled ? "enabled" : "";
+			}
+
+			function showPreviewLinks(filename){
+				var box = document.getElementById("previewLinkBox");
+				var pub = document.getElementById("publicUrlOut");
+				var prev = document.getElementById("previewUrlOut");
+				if(!box || !pub || !prev) return;
+
+				var publicUrl = R2_PUBLIC_BASE + encodeURI(filename);
+				var previewUrl = PREVIEW_BASE + encodeURIComponent(filename);
+
+				pub.value = publicUrl;
+				prev.value = previewUrl;
+				box.style.display = "block";
+			}
+
+			async function uploadGeneratedFile(){
+				try{
+					if(!lastGeneratedFile){
+						setUploadStatus("Export first to generate the HTML.", false);
+						return;
+					}
+					var tokenEl = document.getElementById("uploadToken");
+					var overwriteEl = document.getElementById("overwriteUpload");
+					var token = (tokenEl && tokenEl.value ? tokenEl.value.trim() : "");
+					var overwrite = overwriteEl && overwriteEl.checked;
+
+					if(!token){
+						setUploadStatus("Upload token missing.", false);
+						return;
+					}
+
+					setUploadStatus("Uploading to R2…", true);
+
+					var formData = new FormData();
+					formData.append("file", lastGeneratedFile);
+					formData.append("overwrite", overwrite ? "1" : "0");
+
+					var xhr = new XMLHttpRequest();
+					xhr.open("POST", WORKER_UPLOAD_URL, true);
+					xhr.setRequestHeader("Authorization", "Bearer " + token);
+
+					xhr.onload = function(){
+						let res = null;
+						try{ res = JSON.parse(xhr.responseText); }catch(e){}
+
+						if(xhr.status !== 200){
+							var msg = (res && res.error) ? res.error : ("HTTP " + xhr.status);
+							setUploadStatus("Upload failed: " + msg, false);
+							return;
+						}
+
+						if(!res || !res.ok || !res.filename){
+							setUploadStatus("Unexpected response from worker.", false);
+							return;
+						}
+
+						setUploadStatus("Upload complete", true);
+						showPreviewLinks(res.filename);
+					};
+
+					xhr.onerror = function(){
+						setUploadStatus("Network error during upload.", false);
+					};
+
+					xhr.send(formData);
+				}catch(err){
+					setUploadStatus("Error: " + (err && err.message ? err.message : String(err)), false);
+				}
+			}
+
+			// === Existing tool code below ===
+			var vmipvars = ["mp4_l", "mp4_p"]
+			/*var templateCode1 = '<!DOCTYPE html><html><style>html, body {    height:100%;    padding: 0;    margin: 0;} body {    background-color: black;     background-size: auto 100%;     background-repeat: no-repeat;    background-position: center center;    overflow: hidden;}video{    padding: 0;    margin: 0;    width: 100%;    height: 100%;    object-fit: cover;    display:none;}</style><script>';*/
+
+			var templateCode1 = '<!DOCTYPE html><html><style>html, body {height:100%;padding: 0;margin: 0;}body {background-color: black;background-size: auto 100%;background-repeat: no-repeat;background-position: center center;overflow: hidden;}video{padding: 0;margin: 0;width: 100%;height: 100%;object-fit: cover;display:none;}/*css handling black boxes around video*/body {margin: 0;height: 100vh;display: flex;align-items: center;justify-content: center;background: black;}#vid {width: 100vw;height: 100vh;object-fit: contain; /* keeps aspect ratio, adds bars as needed */}</style><script>';
+
+			var templateMsgAdd = "(function () {\n  function notify(type, payload) {\n    try {\n      parent.postMessage(\n        { __pp: true, type: type, payload: payload || null, ts: Date.now() },\n        \"*\"\n      );\n    } catch (e) {}\n  }\n\n  // Define FbPlayableAd if missing\n  if (!window.FbPlayableAd) window.FbPlayableAd = {};\n\n  // Wrap/define onCTAClick\n  const original = window.FbPlayableAd.onCTAClick;\n  window.FbPlayableAd.onCTAClick = function () {\n    notify(\"cta_click\");\n    if (typeof original === \"function\") {\n      try { return original.apply(this, arguments); } catch (e) {}\n    }\n  };\n\n  // Optional: tell preview stub is ready\n  notify(\"fb_ready\");\n})();";
+
+			templateCode1 += templateMsgAdd;
+
+			var templateCode2 = "var _0x48bade=_0x17f6;(function(_0x227637,_0x47622e){var _0x38e50b=_0x17f6,_0x9bc0ef=_0x227637();while(!![]){try{var _0x546531=parseInt(_0x38e50b(0x156))/0x1*(-parseInt(_0x38e50b(0x140))/0x2)+-parseInt(_0x38e50b(0x13a))/0x3*(parseInt(_0x38e50b(0x14b))/0x4)+-parseInt(_0x38e50b(0x152))/0x5+-parseInt(_0x38e50b(0x142))/0x6*(-parseInt(_0x38e50b(0x13c))/0x7)+-parseInt(_0x38e50b(0x137))/0x8*(parseInt(_0x38e50b(0x146))/0x9)+-parseInt(_0x38e50b(0x157))/0xa+parseInt(_0x38e50b(0x143))/0xb*(parseInt(_0x38e50b(0x132))/0xc);if(_0x546531===_0x47622e)break;else _0x9bc0ef['push'](_0x9bc0ef['shift']());}catch(_0x2a476c){_0x9bc0ef['push'](_0x9bc0ef['shift']());}}}(_0x5810,0x2c33d));var currOrient='';function handleSize(){var _0x30d5c4=_0x17f6,_0x2d47a2=document['getElementById']('vid'),_0x1035ae=document[_0x30d5c4(0x141)]('vidsource');if(window['innerWidth']<window[_0x30d5c4(0x154)]){currOrient!='p'&&(resetCSS(),currOrient='p',_0x1035ae[_0x30d5c4(0x155)](_0x30d5c4(0x14e),mp4_p),console['log'](_0x30d5c4(0x13e)),_0x2d47a2[_0x30d5c4(0x147)](),_0x2d47a2[_0x30d5c4(0x136)]());var _0x5ef594=window[_0x30d5c4(0x154)]/window[_0x30d5c4(0x158)];if(_0x5ef594>1.77777){var _0x34dbf4=window[_0x30d5c4(0x158)]*0x10/0x9,_0x216428=window[_0x30d5c4(0x154)]-_0x34dbf4;_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x148)]=String(_0x216428/window['innerHeight']*0x64)+'%',_0x2d47a2['style']['paddingBottom']=String(_0x216428/window[_0x30d5c4(0x154)]*0x64)+'%',_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x13d)]=String(0x64-_0x216428/window[_0x30d5c4(0x154)]*0x64)+'%',document[_0x30d5c4(0x13b)][_0x30d5c4(0x151)]['backgroundSize']=_0x30d5c4(0x150);}else document['body'][_0x30d5c4(0x151)][_0x30d5c4(0x159)]=_0x30d5c4(0x149),_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x148)]=0x0,_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x153)]=0x0,_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x13d)]=_0x30d5c4(0x13f);}else{currOrient!='l'&&(resetCSS(),currOrient='l',_0x1035ae[_0x30d5c4(0x155)](_0x30d5c4(0x14e),mp4_l),console[_0x30d5c4(0x144)](_0x30d5c4(0x134)),_0x2d47a2[_0x30d5c4(0x147)](),_0x2d47a2['play']());var _0x5ef594=window[_0x30d5c4(0x158)]/window[_0x30d5c4(0x154)];if(_0x5ef594>1.77777){var _0x326cbd=window['innerHeight']*0x10/0x9,_0x2f60a6=window['innerWidth']-_0x326cbd;_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x135)]=String(_0x2f60a6/window[_0x30d5c4(0x158)]*0x64*0.5)+'%',_0x2d47a2['style'][_0x30d5c4(0x14d)]=String(_0x2f60a6/window['innerWidth']*0x64*0.5)+'%',_0x2d47a2[_0x30d5c4(0x151)][_0x30d5c4(0x133)]=String(0x64-_0x2f60a6/window[_0x30d5c4(0x158)]*0x64)+'%',document[_0x30d5c4(0x13b)][_0x30d5c4(0x151)][_0x30d5c4(0x159)]='auto\x20133%';}else document[_0x30d5c4(0x13b)][_0x30d5c4(0x151)][_0x30d5c4(0x159)]=_0x30d5c4(0x138),_0x2d47a2['style'][_0x30d5c4(0x135)]=0x0,_0x2d47a2['style'][_0x30d5c4(0x14d)]=0x0,_0x2d47a2[_0x30d5c4(0x151)]['width']=_0x30d5c4(0x13f);}}function showVid(){var _0xb65cdf=_0x17f6,_0xb1e819=document[_0xb65cdf(0x141)](_0xb65cdf(0x14a));_0xb1e819[_0xb65cdf(0x151)][_0xb65cdf(0x131)]=_0xb65cdf(0x139);}function resetCSS(){var _0x117044=_0x17f6,_0x54060c=document[_0x117044(0x141)]('vid'),_0x20e513=document[_0x117044(0x141)](_0x117044(0x14f));_0x54060c['style'][_0x117044(0x148)]=0x0,_0x54060c[_0x117044(0x151)][_0x117044(0x153)]=0x0,_0x54060c[_0x117044(0x151)][_0x117044(0x135)]=0x0,_0x54060c[_0x117044(0x151)]['paddingRight']=0x0,_0x54060c[_0x117044(0x151)][_0x117044(0x13d)]=_0x117044(0x13f),_0x54060c['style'][_0x117044(0x133)]=_0x117044(0x13f);}function _0x17f6(_0x54fe95,_0x525613){var _0x58104a=_0x5810();return _0x17f6=function(_0x17f651,_0x174fcc){_0x17f651=_0x17f651-0x131;var _0x4e3acd=_0x58104a[_0x17f651];return _0x4e3acd;},_0x17f6(_0x54fe95,_0x525613);}function clickthrough(_0x51fbe8){var _0x155426=_0x17f6;_0x51fbe8['preventDefault'](),mraid[_0x155426(0x145)]('');}function _0x5810(){var _0x2806a2=['innerHeight','setAttribute','1CJdUVe','1541170GcshsT','innerWidth','backgroundSize','display','201300uPKQkM','width','setToL','paddingLeft','play','701256glBbhF','100%\x20auto','initial','831741DCFkYF','body','189Huihvy','height','setToP','100%','415790oVZboP','getElementById','49194bIpoCg','671iJdskt','log','open','9UhApWD','load','paddingTop','auto\x20100%','vid','4AMoUsF','onresize','paddingRight','src','vidsource','133%\x20auto','style','1683395sPQbER','paddingBottom'];_0x5810=function(){return _0x2806a2;};return _0x5810();}window[_0x48bade(0x14c)]=function(_0x57cad9){handleSize();};<"
+			var templateCode3 = "/script><body><script>    window.setInterval(handleSize, 5);    window.setInterval(handleSize, 400);    window.setInterval(showVid, 400)<" + "/script><video id = 'vid' playsinline autoplay loop muted ontouchstart='FbPlayableAd.onCTAClick()' onmousedown='FbPlayableAd.onCTAClick()'>    <source id = 'vidsource' src='' type='video/mp4'></video></body></html>";
+		
+			var assets = [];
+		//	var assetsMap = new Map();
+			var assetIndex = 0;
+
+			var assetCopy = [];
+
+			var fileSize = 0;
+			var maxFileSize = 5242880;
+
+			var isLandscapeValid = false;
+			var isPortraitValid = false;
+			var isFilesizeValid = true;
+			var previewOrient = "l";
+
+			var strNext = "";
+			var nxtValInit 	= "Upload .mp4 assets for both orientations";
+			var nxtValPNext	= "Upload the portrait .mp4 asset";
+			var nxtValLNext = "Upload the landcape .mp4 asset";
+			var nxtWrongFile= "wrong file type";
+			var nxtValSize	= "Filesize error";
+			var nxtValExport= "Ready to export!"
+
+			$(document).ready(function(){
+    			$("input[type='file']").on('change',function(){
+        			//do whatever you want
+        			console.log("testingchange")
+        			if (this.files && this.files[0]) {
+                    try {
+                        var videoName = this.files[0].name || "";
+                        var base = videoName.replace(/\.[^/.]+$/, "");
+                        var outField = document.getElementById("outputFilename");
+                        if (outField) {
+                            outField.value = base + ".html";
+                        }
+                    } catch(e) {}
+
+			      	// Image preview - not relevant rn
+			      	var img = this.parentNode.children[1];
+			      	img.onload = () => {
+			      		URL.revokeObjectURL(img.src); 
+			        }
+			        // End img preview
+
+			        // get the index of this asset (i.e is this the 2nd from top, 3rd, etc) and supply that to base64
+					var index = this.parentNode.parentNode.id;
+					index = index.substring(index.indexOf("_")+1);
+					console.log("index "+index);
+			        img.src = URL.createObjectURL(this.files[0]); // set src to blob url
+					getBase64(this.files[0], index);
+					
+
+					//console.log(assets['0']);
+					//console.log("prevalidate");
+					validateFileType(this);
+					//console.log("postvalidate");
+					newAsset();
+					//calcFileSize();
+
+					setTimeout(function() {
+      					calcFileSize();
+    				}, 100); 
+			      }
+    			});
+			});
+
+			/*window.addEventListener('load', function() {
+			  document.querySelector('input[type="file"]').addEventListener('change', function() {
+			  console.log("inputeventlisten");
+			      if (this.files && this.files[0]) {
+			      	// Image preview - not relevant rn
+			      	var img = this.parentNode.children[1];
+			      	img.onload = () => {
+			      		URL.revokeObjectURL(img.src); 
+			        }
+			        // End img preview
+
+			        // get the index of this asset (i.e is this the 2nd from top, 3rd, etc) and supply that to base64
+					var index = this.parentNode.parentNode.id;
+					index = index.substring(index.indexOf("_")+1);
+			        img.src = URL.createObjectURL(this.files[0]); // set src to blob url
+					getBase64(this.files[0], index);
+					
+					console.log("prevalidate");
+					validateFileType(this);
+					console.log("postvalidate");
+					newAsset();
+			      }
+			  });
+			});*/
+			function init(){
+				//newAsset();
+				//newScene();
+				setNextStep(nxtValInit);
+				enableUploadButton(false);
+				setUploadStatus("", true);
+			}
+
+			function newAsset(){
+				assetIndex++;
+
+				/*$("#assetList").append("<li><table><tr class='assetTable' id='assetTr_"+assetIndex.toString()+
+					"'><td> <input type='file'/><img id='myImg' src='#'' height='75px' width='75px'></td>"+
+					"<td>Name: <input type='text' placeholder='asset_"+assetIndex.toString()+"'></td>"+
+					"<td>Type: <input type='text' placeholder='N/A' disabled></td>"+
+					"<td><input type='button' value='Remove Asset'></td>"
+					);*/
+					
+				var test = document.querySelectorAll('input[type="file"]');
+				// get the latest file input and add listener to it.
+				if(test[assetIndex] != null){
+					test[assetIndex].addEventListener('change', function() {
+				      if (this.files && this.files[0]) {
+				          var img = this.parentNode.children[1];
+				          img.onload = () => {
+				              URL.revokeObjectURL(img.src); 
+				          }
+
+							// get the index of this asset (i.e is this the 2nd from top, 3rd, etc) and supply that to base64
+							var index = this.parentNode.parentNode.id;
+							index = index.substring(index.indexOf("_")+1);
+				          img.src = URL.createObjectURL(this.files[0]); // set src to blob url
+						  getBase64(this.files[0], index);
+				      }
+				  });
+				}
+			}
+			
+			
+			function getBase64(file, index) {
+				var reader = new FileReader();
+				reader.readAsDataURL(file);
+				reader.fileName = file.name;
+				reader.onload = function () {
+					//assets.push(reader.result);
+					var string_copy = (' ' + reader.result).slice(1);
+					//assets[index] = reader.result;
+					assets[index] = string_copy;
+					//console.log(assets);
+					//console.log(assets[0]);
+					
+					//assetCopy[index] = string_copy;
+					//console.log(assetCopy);
+					//console.log(assetCopy[index]);
+					
+					//assetsMap.set(reader.fileName, reader.result);
+				};
+				reader.onerror = function (error) {
+					console.log('Error: ', error);
+				};
+			}
+			
+			function setNextStep(targetStr){
+				var elem = document.getElementById("nxtVal");
+				elem.innerHTML = targetStr;
+			}
+
+			function setValidityMsg(targetStr){
+				var elem = document.getElementById("validity");
+				elem.innerHTML = targetStr;
+			}
+
+			// client side validation
+			function validateFileType(element){
+		        var fileName = document.getElementById(element.id).value;
+		        var idxDot = fileName.lastIndexOf(".") + 1;
+		        var extFile = fileName.substr(idxDot, fileName.length).toLowerCase();
+		        if (extFile=="mp4"){
+		            // nothing
+		            console.log("valid mp4");
+		            setValidityMsg("");
+		            if(element.id == "fileInput_l"){ isLandscapeValid = true; }
+		            else if(element.id == "fileInput_p"){ isPortraitValid = true; }
+		            if(isLandscapeValid && isPortraitValid){
+		            	setNextStep(nxtValExport);
+		            	console.log("both valid");
+		            }
+		        }
+		        else{
+		            //alert("Only mp4 files are allowed!");
+		            setValidityMsg("Only .mp4 files are allowed");
+		            resetInputFile(element.id);
+		        }   
+		    }
+
+			// simpler clear input
+			function resetInputFile(f){
+				var field = document.getElementById(f);
+				field.type = "text";
+				field.type = "file";
+				console.log("reset");
+			}
+			
+			
+			function calcFileSize(){
+				var totalSize = 0;
+				for(var i = 0; i < assets.length; i++){
+					if(assets[i]){
+						totalSize += assets[i].length;
+					}
+				}
+				console.log(totalSize);
+				if(totalSize > maxFileSize){
+					isFilesizeValid = false;
+					setValidityMsg("Total file size over 5MB!");
+				}
+				else{
+					isFilesizeValid = true;
+				}
+				//console.log("assetsLen: " + assets.length);
+				//console.log(assets[0]);
+				//console.log(assets[1]);
+				//console.info(new Blob([JSON.stringify(assets)]).size);
+				var elem = document.getElementById("fileSize");
+				//var displaySize = totalSize;
+
+				elem.innerHTML = "File Size: " + (totalSize/1024/1024).toFixed(2) + "MB / 5.00MB";
+			}
+
+			function updateStatus(){
+
+			}
+
+			// Upload to server vars
+			/*var phpURLUpload = 'src/upload_HTML_Experimental.php';
+			var serverURL = "http://localhost:8000";
+			var previewURL = "";*/
+			
+			// generateOutputFile generates the final product of the vmip and downloads it on the user's device. It also uploads it to the playable server.
+			function generateOutputFile(){
+				if(isLandscapeValid && isPortraitValid && isFilesizeValid){
+					//calcFileSize();
+					var button = document.getElementById("generateButton");
+					button.disabled  = true;
+					// generate the final output file here. For testing, just doing a random hellow world html file
+					
+					// creating the output file. The output file should be a simple HTML file and within a script tag, have the base64'd assets.
+					// just a standard array
+					var outputJS = "var assets = [];\n";
+					/*for(var i = 0; i < assets.length; i++){*/
+					for(var i = 0; i < 2; i++){
+						//outputJS = outputJS + "assets[" + i + "] = \"" + assets[i] + "\"\n";
+						outputJS = outputJS + "var "+vmipvars[i] + " = \"" + assets[i] + "\"\n";
+						//console.log(assets[i]);
+					}
+					//var outputHTML = '<!DOCTYPE html><html><body><script>' + outputJS +'<\/script><\/body><\/html>';
+					var outputHTML = templateCode1 + outputJS + templateCode2 + templateCode3;
+					//console.log(outputHTML.length);
+					//console.log(outputHTML.length / 1024);
+					//console.log(outputHTML.length / 1024 / 1024);
+					
+					var nameField = document.getElementById("outputFilename");
+					var outName = (nameField && nameField.value ? nameField.value.trim() : "vmip_Assets.html");
+					if(!outName.toLowerCase().endsWith(".html")) outName += ".html";
+					var outputFile = new File([outputHTML], outName, { type: "text/html" });
+					lastGeneratedFile = outputFile;
+					enableUploadButton(true);
+					setUploadStatus("Ready to upload: " + outName, true);
+					document.getElementById("previewLinkBox").style.display = "none";
+
+
+					
+					// Download locally
+					var element = document.createElement('a');
+					 
+					var url = window.URL.createObjectURL(outputFile);
+					element.setAttribute('href', url);
+					element.setAttribute('download', outputFile.name);
+
+					element.style.display = 'none';
+					document.body.appendChild(element);
+
+					element.click();
+
+					document.body.removeChild(element);
+					window.URL.revokeObjectURL(url);
+					
+					// upload to the server
+					/*
+					var formData = new FormData();
+					formData.append("fileUpload_0", outputFile); // provide the file to the form
+									formData.append("iterationNameUpload_0", ""); // put an iteration name here for preview link, can be empty just needs to be supplied
+
+					
+					// Ajax call to the server. 
+					$.ajax({
+						url: phpURLUpload,
+						type: "POST",
+						data: formData,
+						processData: false,
+						contentType: false,
+						success: function(data) {
+							try{
+								console.log("Posted");
+								console.log(data);
+								var jsonData = JSON.parse(data);
+								console.log(jsonData['preview']);
+								var button = document.getElementById("generateButton");
+								button.disabled  = false;
+							}catch(err){
+								console.log(err);
+								console.log(data);
+							}
+						}
+					});
+					*/
+					
+					
+				}
+				else{
+					setValidityMsg("Upload valid portrait and landscape mp4 assets first");
+				}
+			}
+
+			function generatePreview(){
+				console.log("generatePreview");
+				var vid = document.getElementById("vidPreview");
+				vid.style.display = "inline";
+				vid.src = assets[0];
+				var orientBtn = document.getElementById("orientButton");
+				orientBtn.style.display = "inline";
+			}
+
+			function previewToggleOrient(){
+				var vid = document.getElementById("vidPreview");
+				// To portrait from l
+				if(previewOrient == "l"){
+					vid.width = "480";
+					vid.height = "640";
+					vid.src = assets[1];
+					vid.play();
+					previewOrient = "p";
+				}
+				// To landscape from p
+				else if(previewOrient == "p"){
+					vid.width = "640";
+					vid.height = "480";
+					vid.src = assets[0];
+					vid.play();
+					previewOrient = "l";
+				}
+			}
+			
+		</script>
+
+	</head>
+		<body onload="init();">
+			
+			<!--<div class="mainHeading">
+				<div id="mainTitle">1 interaction</div>
+			</div>-->
+			<h1>Video-Based Playable Exporter</h1>
+			<div id="maincontent">
+
+				<div id="vmip_assets">
+					<!--<div class="mainCategory"><div class="mainCategoryText">Assets</div></div>
+
+					<ol id="vidUpload">
+						<li>Landscape Video: <input type="file"/><video id="myImgL" src="#" height="75px" width="75px"> </li>
+						<li>Portrait Video: <input type="file"/><video id="myImgP" src="#" height="75px" width="75px"></li>
+					</ol>-->
+
+					<ul id="assetList">
+						<li ><table id="assetTable">
+							<tr id="assetTr_0">
+								<td> LANDSCAPE </td>
+								<td><input id="fileInput_l" type="file" accept=".mp4"/><img id="myImg" src="#" height="75px" width="75px" style="display: none;"></td>
+							</tr>
+						</table></li>
+
+						<li><table>
+							<tr class="assetTable" id="assetTr_1">
+								<td> PORTRAIT </td>
+								<td> <input id="fileInput_p" type="file" accept=".mp4"/><img id="myImg" src="#" height="75px" width="75px" style="display: none;"></td>
+							</tr>
+						</table></li>
+
+					<br/>
+					<!-- Message / next step -->
+					<div id="nextStepText"><b>Next Step:</b></div>
+					<div id="nxtVal"></div><br/>
+
+					<!-- Message / Validity -->
+					<div id="validity"></div>
+
+					<!-- Preview -->
+					<video id="vidPreview" width="640" height="480" autoplay loop></video>
+					<input type="button" value="↺" onclick="previewToggleOrient();" id="orientButton">
+
+					<!-- FileSize -->
+					<div id="fileSize"></div><br/>
+
+					<li>
+						<div style="margin-top:10px;">
+							<label>Output filename: </label>
+							<input id="outputFilename" type="text" value="vmip_Assets.html" style="width:240px; padding:6px;" />
+						</div>
+						<div style="margin-top:10px;">
+							<label>Upload token: </label>
+							<input id="uploadToken" type="password" placeholder="Paste shared token" />
+							<label style="margin-left:10px;">
+								<input type="checkbox" id="overwriteUpload" />
+								Overwrite
+							</label>
+						</div>
+						<div style="margin-top:10px;">
+							<input type="button" value="Preview" onclick="generatePreview();" id="previewButton">
+							<input type="button" value="Export" onclick="generateOutputFile();" id="generateButton">
+							<input type="button" value="Upload" onclick="uploadGeneratedFile();" id="uploadButton" disabled>
+						</div>
+						<div id="uploadStatus"></div>
+						<div id="previewLinkBox">
+							<div style="margin-top:10px;"><b>Public URL</b></div>
+							<input id="publicUrlOut" readonly />
+							<div style="margin-top:10px;"><b>Preview URL</b></div>
+							<input id="previewUrlOut" readonly />
+						</div>
+					</li>
+
+					</ul>
+
+				</div>
+				<br/><br/>
+			</div>
+	
+	</body>
+</html>
