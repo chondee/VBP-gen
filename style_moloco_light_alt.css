@@ -5,9 +5,9 @@
   --moloco-blue-soft: #e9edff;
   --moloco-blue-pale: #f5f7ff;
   --moloco-lavender: #eeeaff;
-  --moloco-lime: #c7f36b;
-  --moloco-lime-soft: #effbd8;
-  --moloco-yellow-soft: #fff4c7;
+  --moloco-accent: #8f7cff;
+  --moloco-accent-soft: #eeeaff;
+  --moloco-cyan-soft: #e7f7ff;
   --moloco-red: #e5484d;
   --moloco-text: #182230;
   --moloco-muted: #667085;
@@ -22,13 +22,22 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   font-family: "Roboto", sans-serif;
   font-weight: 400;
   font-style: normal;
   color: var(--moloco-text);
-  background-color: var(--moloco-background);
+  background:
+    radial-gradient(circle at 88% 0%, rgba(49, 87, 255, 0.10), transparent 30rem),
+    linear-gradient(180deg, #f8f9ff 0%, #f3f5fb 100%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 
 #infoPanel {
@@ -174,7 +183,7 @@ td {
   background: linear-gradient(110deg, var(--moloco-navy) 0%, #172554 45%, var(--moloco-blue) 100%);
   padding: 17px 24px;
   text-align: center;
-  border-bottom: 5px solid var(--moloco-lime);
+  border-bottom: 5px solid #7c8cff;
   box-shadow: 0 5px 18px rgba(16, 24, 40, 0.18);
 }
 
@@ -202,7 +211,7 @@ td {
 
 .condition,
 .conditionParams {
-  background-color: #dce3ff;
+  background-color: #dfe5ff;
 }
 
 .condition {
@@ -212,7 +221,7 @@ td {
 }
 
 .actions {
-  background-color: var(--moloco-lavender);
+  background-color: #eeeaff;
 }
 
 .actionBtn {
@@ -220,14 +229,14 @@ td {
 }
 
 .sceneHead {
-  background-color: var(--moloco-yellow-soft);
-  border-color: #e6c75e;
+  background-color: var(--moloco-cyan-soft);
+  border-color: #9bd9f3;
   width: 70%;
 }
 
 .scenePreset {
   text-align: center;
-  background-color: #e8ebf2;
+  background-color: #eceafd;
   border-color: var(--moloco-border-strong);
 }
 
@@ -238,11 +247,11 @@ td {
 }
 
 .mainCategory {
-  color: var(--moloco-navy);
-  background-color: var(--moloco-lime-soft);
+  color: #172554;
+  background: linear-gradient(90deg, #e9edff 0%, #f1efff 100%);
   margin: 5px;
-  border: 5px solid var(--moloco-lime);
-  border-left-width: 10px;
+  border: 5px solid #c5ceff;
+  border-left: 10px solid #6d7cff;
   font-size: 25px;
   font-weight: bold;
   border-radius: 6px;
